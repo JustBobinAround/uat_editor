@@ -1,0 +1,17 @@
+[package]
+name = "uat_editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = { version = "0.29.0", default-features = true }
+crossterm = "0.28"
+itertools = "0.13.0"
+color-eyre = "0.6.3"
+unicode-width = "=0.2.0"
+pulldown-cmark = "0.13.0"
+arboard = "3.5.0"
+base64 = "0.22.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"

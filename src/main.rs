@@ -75,15 +75,16 @@ impl Config {
 
 fn main() -> Result<(), String> {
     let clipboard = Clipboard::new().with_err_msg(&"Failed to grab system clipboard")?;
-    let editor_name = std::env::var("EDITOR").with_err_msg(&"EXPECTED EDITOR VARIABLE")?;
 
     CLIPBOARD_CELL.get_or_init(|| Arc::new(Mutex::new(clipboard)));
-    EDITOR.get_or_init(|| editor_name);
 
     let terminal = ratatui::init();
     let app_result = App::new();
     let app_result = match app_result {
-        Ok(mut app_result) => app_result.run(terminal),
+        Ok(mut app_result) => {
+            EDITOR.get_or_init(|| app_result.config.editor.clone());
+            app_result.run(terminal)
+        }
         Err(err_msg) => Err(err_msg),
     };
     ratatui::restore();

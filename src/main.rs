@@ -1,11 +1,14 @@
+mod config;
 mod err_msg;
+mod test_step;
+use crate::config::Config;
+use crate::test_step::TestStep;
 use crossterm::event::KeyEvent;
 
 use crate::err_msg::WithErrMsg;
 use arboard::Clipboard;
 use base64::prelude::*;
 use crossterm::event::KeyModifiers;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     fs::File,
@@ -31,47 +34,9 @@ use unicode_width::UnicodeWidthStr;
 
 const ITEM_HEIGHT: usize = 4;
 const MDEMBEDDING: &'static str = "MDEMBEDDING";
-const CONFIG_PATH: &'static str = ".config/uat_editor/config.toml";
 
 static CLIPBOARD_CELL: OnceLock<Arc<Mutex<Clipboard>>> = OnceLock::new();
 static EDITOR: OnceLock<String> = OnceLock::new();
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Config {
-    templates: HashMap<String, Vec<Data>>,
-    editor: String,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        let editor = std::env::var("EDITOR").expect("EXPECTED EDITOR VARIABLE");
-        Config {
-            templates: HashMap::new(),
-            editor,
-        }
-    }
-}
-
-impl Config {
-    pub fn load_config() -> Result<Config, String> {
-        let home = std::env::var("HOME").with_err_msg(&"EXPECTED HOME VARIABLE")?;
-        let path = format!("{}/{}", home, CONFIG_PATH);
-        Ok(match std::fs::read_to_string(path) {
-            Ok(content) => match toml::from_str(&content) {
-                Ok(config) => config,
-                Err(_) => Config::default(),
-            },
-            Err(_) => Config::default(),
-        })
-    }
-
-    pub fn save_config(&self) -> Result<(), String> {
-        let home = std::env::var("HOME").with_err_msg(&"EXPECTED HOME VARIABLE")?;
-        let toml = toml::to_string(self).with_err_msg(&"Failed to serialize config to toml")?;
-        let path = format!("{}/{}", home, CONFIG_PATH);
-        std::fs::write(path, toml).with_err_msg(&"Failed to write config to toml")
-    }
-}
 
 fn main() -> Result<(), String> {
     let clipboard = Clipboard::new().with_err_msg(&"Failed to grab system clipboard")?;
@@ -119,90 +84,6 @@ impl TableColors {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct Data {
-    instructions: String,
-    expected_results: String,
-    ac: String,
-}
-
-impl Data {
-    fn new() -> Data {
-        Data {
-            instructions: String::new(),
-            expected_results: String::new(),
-            ac: String::new(),
-        }
-    }
-
-    fn ref_array(&self) -> [String; 3] {
-        [self.instructions(), self.expected_results(), self.ac()]
-    }
-
-    fn instructions(&self) -> String {
-        self.instructions.trim().to_string()
-    }
-
-    fn expected_results(&self) -> String {
-        self.expected_results.trim().to_string()
-    }
-
-    fn ac(&self) -> String {
-        self.ac.trim().to_string()
-    }
-
-    fn parse_markdown(input: &String) -> Result<Data, String> {
-        let lower = input.to_lowercase();
-
-        let instructions;
-        let expected_results;
-        let ac;
-
-        let idx = lower
-            .find("# instructions")
-            .with_err_msg(&"Could not find instruction section")?;
-
-        let input = input.split_at(idx + 15).1;
-        let lower = input.to_lowercase();
-
-        let idx = lower
-            .find("# expected results")
-            .with_err_msg(&"Could not find expected results section")?;
-
-        let split = input.split_at(idx);
-        let splitb = input.split_at(idx + 19);
-        instructions = split.0.to_string();
-        let input = splitb.1;
-        let lower = input.to_lowercase();
-
-        let idx = lower
-            .find("# ac")
-            .with_err_msg(&"Could not find ac section")?;
-
-        let split = input.split_at(idx);
-        let splitb = input.split_at(idx + 5);
-        expected_results = split.0.to_string();
-        ac = splitb.1.to_string();
-
-        let data = Data {
-            instructions,
-            expected_results,
-            ac,
-        };
-
-        Ok(data)
-    }
-
-    fn gen_markdown(&self) -> String {
-        format!(
-            "# Instructions\n{}\n\n# Expected Results\n{}\n\n# AC\n{}",
-            self.instructions(),
-            self.expected_results(),
-            self.ac()
-        )
-    }
-}
-
 enum Window {
     UAT,
     Template,
@@ -233,15 +114,15 @@ impl MsgState {
 
 struct App {
     config: Config,
-    template_list: Vec<Data>,
+    template_list: Vec<TestStep>,
     window: Window,
     msg_state: MsgState,
     state: TableState,
-    items: Vec<Data>,
+    items: Vec<TestStep>,
     longest_item_lens: (u16, u16, u16, u16), // order is (name, instructions, expected_results)
     colors: TableColors,
     scroll_state: ScrollbarState,
-    internal_clipboard: Option<Data>,
+    internal_clipboard: Option<TestStep>,
 }
 
 impl App {
@@ -259,7 +140,7 @@ impl App {
             .templates
             .keys()
             .map(|name| {
-                let mut data = Data::new();
+                let mut data = TestStep::new();
                 data.instructions = name.clone();
                 data
             })
@@ -495,7 +376,7 @@ td {
             .with_err_msg(&"Failed to grab edits to uat_editor.md")
     }
 
-    fn grab_selection_as_mut(&mut self) -> Result<(usize, &mut Data), String> {
+    fn grab_selection_as_mut(&mut self) -> Result<(usize, &mut TestStep), String> {
         let idx = self
             .state
             .selected()
@@ -508,7 +389,7 @@ td {
         Ok((idx, data))
     }
 
-    fn grab_selection_as_markdown(&mut self) -> Result<(&mut Data, String), String> {
+    fn grab_selection_as_markdown(&mut self) -> Result<(&mut TestStep, String), String> {
         let (_, data) = self.grab_selection_as_mut()?;
         let md = data.gen_markdown();
         Ok((data, md))
@@ -517,7 +398,7 @@ td {
     fn edit_existing(&mut self, terminal: &mut DefaultTerminal) -> Result<(), String> {
         let (item, item_md) = self.grab_selection_as_markdown()?;
         let content = App::open_editor(item_md, terminal)?;
-        let new_data = Data::parse_markdown(&content)?;
+        let new_data = TestStep::parse_markdown(&content)?;
         *item = new_data;
         Ok(())
     }
@@ -573,11 +454,11 @@ td {
     }
 
     fn insert_step(&mut self, terminal: &mut DefaultTerminal, above: bool) -> Result<(), String> {
-        let data = Data::new();
+        let data = TestStep::new();
         let item_md = data.gen_markdown();
         let content = App::open_editor(item_md, terminal)?;
 
-        let new_data = Data::parse_markdown(&content)
+        let new_data = TestStep::parse_markdown(&content)
             .with_err_msg(&"Failed to parse markdown while inserting step")?;
 
         if let Some(idx) = self.state.selected() {
@@ -688,7 +569,7 @@ td {
             .templates
             .keys()
             .map(|name| {
-                let mut data = Data::new();
+                let mut data = TestStep::new();
                 data.instructions = name.clone();
                 data
             })
@@ -970,7 +851,7 @@ td {
     }
 }
 
-fn constraint_len_calculator(items: &[Data]) -> (u16, u16, u16, u16) {
+fn constraint_len_calculator(items: &[TestStep]) -> (u16, u16, u16, u16) {
     let name_len = 4_u16;
 
     let address_len = items

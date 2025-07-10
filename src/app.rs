@@ -274,56 +274,41 @@ td {
         Ok(table)
     }
 
+    fn length_constraint(&self) -> usize {
+        match self.window {
+            Window::UAT => self.items.len(),
+            Window::Template => self.template_list.len(),
+        }
+    }
+
     pub fn next_row(&mut self) {
-        let i = match self.window {
-            Window::UAT => match self.state.selected() {
-                Some(i) => {
-                    if i >= self.items.len() - 1 {
-                        0
-                    } else {
-                        i + 1
-                    }
+        let i = self
+            .state
+            .selected()
+            .map(|i| {
+                if i >= self.length_constraint() - 1 {
+                    0
+                } else {
+                    i + 1
                 }
-                None => 0,
-            },
-            Window::Template => match self.state.selected() {
-                Some(i) => {
-                    if i >= self.template_list.len() - 1 {
-                        0
-                    } else {
-                        i + 1
-                    }
-                }
-                None => 0,
-            },
-        };
+            })
+            .unwrap_or(0);
         self.state.select(Some(i));
         self.scroll_state = self.scroll_state.position(i * ITEM_HEIGHT);
     }
 
     pub fn previous_row(&mut self) {
-        let i = match self.window {
-            Window::UAT => match self.state.selected() {
-                Some(i) => {
-                    if i == 0 {
-                        self.items.len() - 1
-                    } else {
-                        i - 1
-                    }
+        let i = self
+            .state
+            .selected()
+            .map(|i| {
+                if i == 0 {
+                    self.length_constraint() - 1
+                } else {
+                    i - 1
                 }
-                None => 0,
-            },
-            Window::Template => match self.state.selected() {
-                Some(i) => {
-                    if i == 0 {
-                        self.template_list.len() - 1
-                    } else {
-                        i - 1
-                    }
-                }
-                None => 0,
-            },
-        };
+            })
+            .unwrap_or(0);
         self.state.select(Some(i));
         self.scroll_state = self.scroll_state.position(i * ITEM_HEIGHT);
     }

@@ -7,11 +7,7 @@ use crate::app::App;
 
 fn main() -> Result<(), String> {
     let terminal = ratatui::init();
-    let app_result = App::new();
-    let app_result = match app_result {
-        Ok(mut app_result) => app_result.run(terminal),
-        Err(err_msg) => Err(err_msg),
-    };
+    let app_result = App::new().ok().map(|mut app| app.run(terminal));
     ratatui::restore();
     eprintln!("Final App State: {:#?}", app_result);
     Ok(())

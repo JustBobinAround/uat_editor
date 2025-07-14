@@ -9,7 +9,7 @@ use crossterm::event::KeyModifiers;
 use std::{
     collections::{HashMap, VecDeque},
     fs::File,
-    io::Write,
+    io::{Read, Write},
     process::{Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
 };
@@ -480,7 +480,8 @@ td {
         terminal: &mut DefaultTerminal,
         key: KeyEvent,
     ) -> Result<MsgState, String> {
-        let _shift_pressed = key.modifiers.contains(KeyModifiers::SHIFT);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if key.kind == KeyEventKind::Press {
             match key.code {
                 KeyCode::Char('q') => return Err("Quiting".to_string()),
@@ -493,7 +494,14 @@ td {
                 KeyCode::Char('y') => MsgState::log_err_msg_or(self.yank()),
                 KeyCode::Char('$') => MsgState::log_err_msg_or(self.compile_to_clipboard()),
                 KeyCode::Char('+') => MsgState::log_err_msg(self.load_from_clipboard()),
-                KeyCode::Char('d') => MsgState::log_err_msg(self.delete_yank()),
+                KeyCode::Char('d') => MsgState::log_err_msg({
+                    if ctrl && shift {
+                        self.items = Vec::new();
+                        Ok(())
+                    } else {
+                        self.delete_yank()
+                    }
+                }),
                 KeyCode::Char('p') => MsgState::log_err_msg(self.paste(false)),
                 KeyCode::Char('P') => MsgState::log_err_msg(self.paste(true)),
                 KeyCode::Char('o') => MsgState::log_err_msg(self.insert_step(terminal, false)),
@@ -647,10 +655,47 @@ td {
         Ok(())
     }
 
+    pub fn write_backup(&self) -> Result<(), String> {
+        let home = std::env::var("HOME").with_err_msg(&"EXPECTED HOME VARIABLE")?;
+        let file_path = format!("{}/.config/uat_editor/backup.html", home);
+        let html_backup = self.gen_html()?;
+        let mut file = File::create(file_path)
+            .with_err_msg(&"Failed to open /.config/uat_editor/backup.html for backup")?;
+
+        file.write_all(html_backup.as_bytes())
+            .with_err_msg(&"Failed to populate /.config/uat_editor/backup.html for backup")?;
+
+        Ok(())
+    }
+
+    pub fn load_backup(&mut self) -> Result<(), String> {
+        let home = std::env::var("HOME").with_err_msg(&"EXPECTED HOME VARIABLE")?;
+        let file_path = format!("{}/.config/uat_editor/backup.html", home);
+
+        let mut file = File::open(file_path).with_err_msg(&"Failed to open backup")?;
+
+        let mut buffer = String::new();
+
+        let text = file
+            .read_to_string(&mut buffer)
+            .with_err_msg(&"Failed to open backup to string")?;
+
+        self.parse_clipboard_context(buffer)?;
+
+        Ok(())
+    }
+
     pub fn run(&mut self, mut terminal: DefaultTerminal) -> Result<(), String> {
+        let _ = self.load_backup();
         loop {
             let _ = terminal.draw(|frame| self.draw(frame));
-            let _ = self.handle_events(&mut terminal)?;
+            match self.handle_events(&mut terminal) {
+                Err(err_msg) => {
+                    self.write_backup()?;
+                    return Err(err_msg);
+                }
+                _ => {}
+            }
         }
     }
 

@@ -113,7 +113,7 @@ impl App {
             window: Window::UAT,
             msg_state: MsgState::Default,
             state: TableState::default().with_selected(0),
-            longest_item_lens: constraint_len_calculator(&data_vec),
+            longest_item_lens: (4, 20, 20, 10),
             scroll_state: ScrollbarState::new(idx * ITEM_HEIGHT),
             colors: Colors::new(),
             items: data_vec,
@@ -722,6 +722,7 @@ impl App {
                 .orientation(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(None)
                 .end_symbol(None),
+            //TODO: figure out how to scroll earlier, I think it involves this
             area.inner(Margin {
                 vertical: 1,
                 horizontal: 1,
@@ -756,62 +757,12 @@ impl App {
             MsgState::Loaded => self.gen_msg("LOADED CONTEXT FROM CLIPBOARD"),
             MsgState::DynamicMsg(msg)=> self.gen_msg(msg.as_str()),
         };
+
         let info_footer = Paragraph::new(Text::from_iter(to_display))
             .style(self.colors.info_style())
             .centered()
-            .block(
-                Block::bordered()
-                    .border_type(BorderType::Double)
-                    .border_style(Style::new().fg(self.colors.footer_border_color)),
-            );
+            .block(self.colors.info_block());
+
         frame.render_widget(info_footer, area);
     }
-}
-
-fn constraint_len_calculator(items: &[TestStep]) -> (u16, u16, u16, u16) {
-    let name_len = 4_u16;
-
-    let address_len = items
-        .iter()
-        .map(|i| {
-            i.instructions()
-                .split("\n")
-                .map(UnicodeWidthStr::width)
-                .max()
-                .unwrap_or(0)
-        })
-        .max()
-        .unwrap_or(0);
-
-    let email_len = items
-        .iter()
-        .map(|i| {
-            i.expected_results()
-                .split("\n")
-                .map(UnicodeWidthStr::width)
-                .max()
-                .unwrap_or(0)
-        })
-        .max()
-        .unwrap_or(0);
-
-    let ac_len = items
-        .iter()
-        .map(|i| {
-            i.ac()
-                .split("\n")
-                .map(UnicodeWidthStr::width)
-                .max()
-                .unwrap_or(0)
-        })
-        .max()
-        .unwrap_or(0);
-
-    #[allow(clippy::cast_possible_truncation)]
-    (
-        name_len as u16,
-        address_len as u16,
-        email_len as u16,
-        ac_len as u16,
-    )
 }

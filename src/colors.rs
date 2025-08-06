@@ -1,4 +1,7 @@
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::{
+    style::{Color, Modifier, Style, Stylize},
+    widgets::{Block, BorderType},
+};
 pub struct Colors {
     pub buffer_bg: Color,
     pub header_bg: Color,
@@ -57,5 +60,11 @@ impl Colors {
 
     pub fn info_style(&self) -> Style {
         Style::new().fg(self.row_fg).bg(self.buffer_bg)
+    }
+
+    pub fn info_block(&self) -> Block {
+        Block::bordered()
+            .border_type(BorderType::Double)
+            .border_style(Style::new().fg(self.footer_border_color))
     }
 }

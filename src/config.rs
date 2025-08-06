@@ -2,18 +2,21 @@ use crate::err_msg::WithErrMsg;
 use crate::test_step::TestStep;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 const CONFIG_PATH: &'static str = ".config/uat_editor/config.toml";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub templates: HashMap<String, Vec<TestStep>>,
-    pub editor: String,
+    pub editor: Arc<String>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        let editor = std::env::var("EDITOR").expect("EXPECTED EDITOR VARIABLE");
+        let editor = std::env::var("EDITOR")
+            .expect("EXPECTED EDITOR VARIABLE")
+            .into();
         Config {
             templates: HashMap::new(),
             editor,

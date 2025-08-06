@@ -68,6 +68,11 @@ enum Window {
     Template,
 }
 
+enum InsertDirection {
+    Up,
+    Down,
+}
+
 enum MsgState {
     Default,
     Compile,
@@ -91,6 +96,10 @@ impl MsgState {
     }
 }
 
+enum InputMode {
+    Normal,
+    Prefix(String),
+}
 pub struct App {
     config: Config,
     template_list: Vec<TestStep>,
@@ -102,6 +111,7 @@ pub struct App {
     colors: TableColors,
     scroll_state: ScrollbarState,
     internal_clipboard: Option<TestStep>,
+    input_mode: InputMode,
 }
 
 impl App {
@@ -139,6 +149,7 @@ impl App {
             colors: TableColors::new(),
             items: data_vec,
             internal_clipboard: None,
+            input_mode: InputMode::Normal,
         })
     }
 
@@ -290,7 +301,6 @@ impl App {
     }
 
     fn edit_existing(&mut self, terminal: &mut DefaultTerminal) -> Result<(), String> {
-        //TODO: need to clean this up
         let editor = self.config.editor.clone();
         let (item, item_md) = self.grab_selection_as_markdown()?;
         let content = App::open_editor(editor.as_str(), item_md, terminal)?;
@@ -328,7 +338,7 @@ impl App {
         Ok(())
     }
 
-    fn paste(&mut self, above: bool) -> Result<(), String> {
+    fn paste(&mut self, direction: InsertDirection) -> Result<(), String> {
         let idx = self
             .state
             .selected()
@@ -340,19 +350,25 @@ impl App {
             .with_err_msg(&"No step in internal register")?
             .clone();
 
-        if above {
-            self.items.insert(idx, item);
-        } else {
-            self.items.insert(idx + 1, item);
+        match direction {
+            InsertDirection::Up => {
+                self.items.insert(idx, item);
+            }
+            InsertDirection::Down => {
+                self.items.insert(idx + 1, item);
+            }
         }
 
         Ok(())
     }
 
-    fn insert_step(&mut self, terminal: &mut DefaultTerminal, above: bool) -> Result<(), String> {
+    fn insert_step(
+        &mut self,
+        terminal: &mut DefaultTerminal,
+        direction: InsertDirection,
+    ) -> Result<(), String> {
         let data = TestStep::new();
         let item_md = data.gen_markdown();
-        //TODO: need to clean this up
         let editor = self.config.editor.clone();
         let content = App::open_editor(editor.as_str(), item_md, terminal)?;
 
@@ -360,11 +376,14 @@ impl App {
             .with_err_msg(&"Failed to parse markdown while inserting step")?;
 
         if let Some(idx) = self.state.selected() {
-            if above {
-                self.items.insert(idx, new_data);
-            } else {
-                self.items.insert(idx + 1, new_data);
-                self.state.select(Some(idx + 1));
+            match direction {
+                InsertDirection::Up => {
+                    self.items.insert(idx, new_data);
+                }
+                InsertDirection::Down => {
+                    self.items.insert(idx + 1, new_data);
+                    self.state.select(Some(idx + 1));
+                }
             }
         } else {
             self.items.push(new_data);
@@ -402,6 +421,20 @@ impl App {
         self.parse_clipboard_context(text)
     }
 
+    fn handle_deletion(&mut self, ctrl: bool, shift: bool) -> Result<(), String> {
+        if ctrl && shift {
+            self.items = Vec::new();
+            Ok(())
+        } else {
+            self.delete_yank()
+        }
+    }
+
+    fn switch_to_template_window(&mut self) -> MsgState {
+        self.window = Window::Template;
+        MsgState::Default
+    }
+
     fn handle_uat_keys(
         &mut self,
         terminal: &mut DefaultTerminal,
@@ -421,22 +454,16 @@ impl App {
                 KeyCode::Char('y') => MsgState::log_err_msg_or(self.yank()),
                 KeyCode::Char('$') => MsgState::log_err_msg_or(self.compile_to_clipboard()),
                 KeyCode::Char('+') => MsgState::log_err_msg(self.load_from_clipboard()),
-                KeyCode::Char('d') => MsgState::log_err_msg({
-                    if ctrl && shift {
-                        self.items = Vec::new();
-                        Ok(())
-                    } else {
-                        self.delete_yank()
-                    }
-                }),
-                KeyCode::Char('p') => MsgState::log_err_msg(self.paste(false)),
-                KeyCode::Char('P') => MsgState::log_err_msg(self.paste(true)),
-                KeyCode::Char('o') => MsgState::log_err_msg(self.insert_step(terminal, false)),
-                KeyCode::Char('O') => MsgState::log_err_msg(self.insert_step(terminal, true)),
-                KeyCode::Char('t') => {
-                    self.window = Window::Template;
-                    MsgState::Default
+                KeyCode::Char('d') => MsgState::log_err_msg(self.handle_deletion(ctrl, shift)),
+                KeyCode::Char('p') => MsgState::log_err_msg(self.paste(InsertDirection::Down)),
+                KeyCode::Char('P') => MsgState::log_err_msg(self.paste(InsertDirection::Up)),
+                KeyCode::Char('o') => {
+                    MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Down))
                 }
+                KeyCode::Char('O') => {
+                    MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up))
+                }
+                KeyCode::Char('t') => self.switch_to_template_window(),
                 _ => MsgState::Default,
             })
         } else {

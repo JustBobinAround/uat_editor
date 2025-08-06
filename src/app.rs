@@ -1,3 +1,4 @@
+use crate::colors::Colors;
 use crate::config::Config;
 use crate::test_step::TestStep;
 use crossterm::event::KeyEvent;
@@ -11,7 +12,6 @@ use std::{
     fs::File,
     io::{Read, Write},
     process::{Command, Stdio},
-    sync::{Arc, Mutex, OnceLock},
 };
 
 use pulldown_cmark::{Options, Parser};
@@ -19,7 +19,7 @@ use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
     layout::{Constraint, Layout, Margin, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Style, Stylize},
     text::Text,
     widgets::{
         Block, BorderType, Cell, HighlightSpacing, Paragraph, Row, Scrollbar, ScrollbarOrientation,
@@ -30,34 +30,6 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 const ITEM_HEIGHT: usize = 4;
 const MDEMBEDDING: &'static str = "MDEMBEDDING";
-
-struct TableColors {
-    buffer_bg: Color,
-    header_bg: Color,
-    header_fg: Color,
-    row_fg: Color,
-    selected_column_style_fg: Color,
-    selected_cell_style_fg: Color,
-    normal_row_color: Color,
-    alt_row_color: Color,
-    footer_border_color: Color,
-}
-
-impl TableColors {
-    const fn new() -> Self {
-        Self {
-            buffer_bg: Color::Rgb(35, 33, 54),
-            header_bg: Color::Rgb(35, 33, 54),
-            header_fg: Color::Rgb(224, 222, 244),
-            row_fg: Color::Rgb(224, 222, 244),
-            selected_column_style_fg: Color::Rgb(68, 65, 90),
-            selected_cell_style_fg: Color::Rgb(68, 65, 90),
-            normal_row_color: Color::Rgb(35, 33, 54),
-            alt_row_color: Color::Rgb(57, 53, 82),
-            footer_border_color: Color::Rgb(62, 143, 176),
-        }
-    }
-}
 
 enum Window {
     UAT,
@@ -105,7 +77,7 @@ pub struct App {
     state: TableState,
     items: Vec<TestStep>,
     longest_item_lens: (u16, u16, u16, u16), // order is (name, instructions, expected_results)
-    colors: TableColors,
+    colors: Colors,
     scroll_state: ScrollbarState,
     internal_clipboard: Option<TestStep>,
     input_mode: InputMode,
@@ -143,7 +115,7 @@ impl App {
             state: TableState::default().with_selected(0),
             longest_item_lens: constraint_len_calculator(&data_vec),
             scroll_state: ScrollbarState::new(idx * ITEM_HEIGHT),
-            colors: TableColors::new(),
+            colors: Colors::new(),
             items: data_vec,
             internal_clipboard: None,
             input_mode: InputMode::Normal,
@@ -423,6 +395,43 @@ impl App {
         MsgState::Default
     }
 
+    fn handle_safe_keys(&mut self, code: KeyCode, _ctrl: bool, _shift: bool) {
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => self.next_row(),
+            KeyCode::Char('k') | KeyCode::Up => self.previous_row(),
+            _ => {}
+        }
+    }
+
+    fn handle_unsafe_keys(
+        &mut self,
+        terminal: &mut DefaultTerminal,
+        code: KeyCode,
+        ctrl: bool,
+        shift: bool,
+    ) -> Result<MsgState, String> {
+        let res = match code {
+            KeyCode::Char('q') => return Err("Quiting".to_string()),
+            KeyCode::Enter => MsgState::log_err_msg(self.edit_existing(terminal)),
+            KeyCode::Char('y') => MsgState::log_err_msg_or(self.yank()),
+            KeyCode::Char('$') => MsgState::log_err_msg_or(self.compile_to_clipboard()),
+            KeyCode::Char('+') => MsgState::log_err_msg(self.load_from_clipboard()),
+            KeyCode::Char('d') => MsgState::log_err_msg(self.handle_deletion(ctrl, shift)),
+            KeyCode::Char('p') => MsgState::log_err_msg(self.paste(InsertDirection::Down)),
+            KeyCode::Char('P') => MsgState::log_err_msg(self.paste(InsertDirection::Up)),
+            KeyCode::Char('o') => {
+                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Down))
+            }
+            KeyCode::Char('O') => {
+                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up))
+            }
+            KeyCode::Char('t') => self.switch_to_template_window(),
+            _ => MsgState::Default,
+        };
+
+        Ok(res)
+    }
+
     fn handle_uat_keys(
         &mut self,
         terminal: &mut DefaultTerminal,
@@ -431,29 +440,9 @@ impl App {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if key.kind == KeyEventKind::Press {
-            match key.code {
-                KeyCode::Char('q') => return Err("Quiting".to_string()),
-                KeyCode::Char('j') | KeyCode::Down => self.next_row(),
-                KeyCode::Char('k') | KeyCode::Up => self.previous_row(),
-                _ => {}
-            }
-            Ok(match key.code {
-                KeyCode::Enter => MsgState::log_err_msg(self.edit_existing(terminal)),
-                KeyCode::Char('y') => MsgState::log_err_msg_or(self.yank()),
-                KeyCode::Char('$') => MsgState::log_err_msg_or(self.compile_to_clipboard()),
-                KeyCode::Char('+') => MsgState::log_err_msg(self.load_from_clipboard()),
-                KeyCode::Char('d') => MsgState::log_err_msg(self.handle_deletion(ctrl, shift)),
-                KeyCode::Char('p') => MsgState::log_err_msg(self.paste(InsertDirection::Down)),
-                KeyCode::Char('P') => MsgState::log_err_msg(self.paste(InsertDirection::Up)),
-                KeyCode::Char('o') => {
-                    MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Down))
-                }
-                KeyCode::Char('O') => {
-                    MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up))
-                }
-                KeyCode::Char('t') => self.switch_to_template_window(),
-                _ => MsgState::Default,
-            })
+            let code = key.code;
+            self.handle_safe_keys(code, ctrl, shift);
+            self.handle_unsafe_keys(terminal, code, ctrl, shift)
         } else {
             Ok(MsgState::Default)
         }
@@ -649,104 +638,82 @@ impl App {
         self.render_footer(frame, rects[1]);
     }
 
-    fn render_uat_table(&mut self, frame: &mut Frame, area: Rect) {
-        let header_style = Style::default()
-            .fg(self.colors.header_fg)
-            .bold()
-            .underlined()
-            .bg(self.colors.header_bg);
+    fn text_cell<'a>(text: String) -> Cell<'a> {
+        Cell::from(Text::from(text))
+    }
 
-        let selected_row_style = Style::default().add_modifier(Modifier::REVERSED);
+    fn build_row<'a>(&self, i: usize, data: &TestStep) -> Row<'a> {
+        let item = data.ref_array();
+        let mut item: VecDeque<Cell> = item
+            .into_iter()
+            .map(|content| Self::text_cell(format!("\n{content}\n")))
+            .collect();
 
-        let selected_col_style = Style::default().fg(self.colors.selected_column_style_fg);
+        item.push_front(Self::text_cell(format!("\n{}\n", i + 1)));
 
-        let selected_cell_style = Style::default()
-            .add_modifier(Modifier::REVERSED)
-            .fg(self.colors.selected_cell_style_fg);
+        item.into_iter()
+            .map(|i| i)
+            .collect::<Row>()
+            .style(self.colors.row_style(i))
+            .height(4)
+    }
 
+    fn build_rows<'a>(&self, data: &Vec<TestStep>) -> Vec<Row<'a>> {
+        data.iter()
+            .enumerate()
+            .map(|(i, data)| self.build_row(i, data))
+            .collect()
+    }
+
+    fn build_table<'a>(&self, data: Vec<Row<'a>>) -> Table<'a> {
+        Table::new(
+            data,
+            [
+                // + 1 is for padding.
+                Constraint::Length(self.longest_item_lens.0 + 1),
+                Constraint::Min(self.longest_item_lens.1 + 1),
+                Constraint::Min(self.longest_item_lens.2 + 1),
+                Constraint::Min(self.longest_item_lens.3),
+            ],
+        )
+    }
+
+    fn build_headers<'a>(&self) -> Row<'a> {
         let header = match self.window {
             Window::UAT => ["#", "Test Directions", "Expected Results", "AC"],
             Window::Template => ["#", "Template Name", "", ""],
         };
 
-        let header = header
+        header
             .into_iter()
             .map(Cell::from)
             .collect::<Row>()
-            .style(header_style)
-            .height(1);
-        let uat_rows = self.items.iter().enumerate().map(|(i, data)| {
-            let color = match i % 2 {
-                0 => self.colors.normal_row_color,
-                _ => self.colors.alt_row_color,
-            };
-            let item = data.ref_array();
-            let mut item: VecDeque<Cell> = item
-                .into_iter()
-                .map(|content| Cell::from(Text::from(format!("\n{content}\n"))))
-                .collect();
-            item.push_front(Cell::from(Text::from(format!("\n{}\n", i + 1))));
+            .style(self.colors.header_style())
+            .height(1)
+    }
 
-            let item = item.into_iter().map(|i| i).collect::<Row>();
-
-            item.style(Style::new().fg(self.colors.row_fg).bg(color))
-                .height(4)
-        });
-        let template_rows = self.template_list.iter().enumerate().map(|(i, data)| {
-            let color = match i % 2 {
-                0 => self.colors.normal_row_color,
-                _ => self.colors.alt_row_color,
-            };
-            let item = data.ref_array();
-            let mut item: VecDeque<Cell> = item
-                .into_iter()
-                .map(|content| Cell::from(Text::from(format!("\n{content}\n"))))
-                .collect();
-            item.push_front(Cell::from(Text::from(format!("\n{}\n", i + 1))));
-
-            let item = item.into_iter().map(|i| i).collect::<Row>();
-
-            item.style(Style::new().fg(self.colors.row_fg).bg(color))
-                .height(4)
-        });
-
-        let table = match self.window {
-            Window::UAT => Table::new(
-                uat_rows,
-                [
-                    // + 1 is for padding.
-                    Constraint::Length(self.longest_item_lens.0 + 1),
-                    Constraint::Min(self.longest_item_lens.1 + 1),
-                    Constraint::Min(self.longest_item_lens.2 + 1),
-                    Constraint::Min(self.longest_item_lens.3),
-                ],
-            ),
-            Window::Template => Table::new(
-                template_rows,
-                [
-                    // + 1 is for padding.
-                    Constraint::Length(self.longest_item_lens.0 + 1),
-                    Constraint::Min(self.longest_item_lens.1 + 1),
-                    Constraint::Min(self.longest_item_lens.2 + 1),
-                    Constraint::Min(self.longest_item_lens.3),
-                ],
-            ),
+    fn render_uat_table(&mut self, frame: &mut Frame, area: Rect) {
+        let table_rows = match self.window {
+            Window::UAT => self.build_rows(&self.items),
+            Window::Template => self.build_rows(&self.template_list),
         };
-        let bar = " █ ";
-        let t = table
-            .header(header)
-            .row_highlight_style(selected_row_style)
-            .column_highlight_style(selected_col_style)
-            .cell_highlight_style(selected_cell_style)
+
+        let table = self
+            .build_table(table_rows)
+            .header(self.build_headers())
+            .row_highlight_style(self.colors.selected_row_style())
+            .column_highlight_style(self.colors.selected_col_style())
+            .cell_highlight_style(self.colors.selected_cell_style())
             .highlight_symbol(Text::from(vec![
                 "".into(),
-                bar.into(),
-                bar.into(),
+                " █ ".into(),
+                " █ ".into(),
                 "".into(),
             ]))
             .bg(self.colors.buffer_bg)
             .highlight_spacing(HighlightSpacing::Always);
-        frame.render_stateful_widget(t, area, &mut self.state);
+
+        frame.render_stateful_widget(table, area, &mut self.state);
     }
 
     fn render_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
@@ -764,11 +731,8 @@ impl App {
     }
 
     fn gen_msg(&self, line_one: &str) -> [String; 2] {
-        let padding = "===========";
-        [
-            format!("{}{}{}", padding, line_one, padding),
-            "".to_string(),
-        ]
+        //TODO: figure out why this doesn't pad anything
+        [format!("{:=^16}", line_one), "".to_string()]
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
@@ -793,11 +757,7 @@ impl App {
             MsgState::DynamicMsg(msg)=> self.gen_msg(msg.as_str()),
         };
         let info_footer = Paragraph::new(Text::from_iter(to_display))
-            .style(
-                Style::new()
-                    .fg(self.colors.row_fg)
-                    .bg(self.colors.buffer_bg),
-            )
+            .style(self.colors.info_style())
             .centered()
             .block(
                 Block::bordered()
@@ -822,6 +782,7 @@ fn constraint_len_calculator(items: &[TestStep]) -> (u16, u16, u16, u16) {
         })
         .max()
         .unwrap_or(0);
+
     let email_len = items
         .iter()
         .map(|i| {

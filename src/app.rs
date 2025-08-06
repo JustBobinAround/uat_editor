@@ -1,12 +1,6 @@
-use crate::colors::Colors;
-use crate::config::Config;
-use crate::test_step::TestStep;
-use crossterm::event::KeyEvent;
-
-use crate::err_msg::WithErrMsg;
+use crate::{colors::Colors, config::Config, err_msg::WithErrMsg, test_step::TestStep};
 use arboard::Clipboard;
 use base64::prelude::*;
-use crossterm::event::KeyModifiers;
 use std::{
     collections::VecDeque,
     fs::File,
@@ -17,17 +11,16 @@ use std::{
 use pulldown_cmark::{Options, Parser};
 use ratatui::{
     DefaultTerminal, Frame,
-    crossterm::event::{self, Event, KeyCode, KeyEventKind},
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     layout::{Constraint, Layout, Margin, Rect},
-    style::{Style, Stylize},
+    style::Stylize,
     text::Text,
     widgets::{
-        Block, BorderType, Cell, HighlightSpacing, Paragraph, Row, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Table, TableState,
+        Cell, HighlightSpacing, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Table, TableState,
     },
 };
 
-use unicode_width::UnicodeWidthStr;
 const ITEM_HEIGHT: usize = 4;
 const MDEMBEDDING: &'static str = "MDEMBEDDING";
 
@@ -76,7 +69,7 @@ pub struct App {
     msg_state: MsgState,
     state: TableState,
     items: Vec<TestStep>,
-    longest_item_lens: (u16, u16, u16, u16), // order is (name, instructions, expected_results)
+    col_constraints: (u16, u16, u16, u16), // order is (name, instructions, expected_results)
     colors: Colors,
     scroll_state: ScrollbarState,
     internal_clipboard: Option<TestStep>,
@@ -113,7 +106,7 @@ impl App {
             window: Window::UAT,
             msg_state: MsgState::Default,
             state: TableState::default().with_selected(0),
-            longest_item_lens: (4, 20, 20, 10),
+            col_constraints: (4, 20, 20, 10),
             scroll_state: ScrollbarState::new(idx * ITEM_HEIGHT),
             colors: Colors::new(),
             items: data_vec,
@@ -670,10 +663,10 @@ impl App {
             data,
             [
                 // + 1 is for padding.
-                Constraint::Length(self.longest_item_lens.0 + 1),
-                Constraint::Min(self.longest_item_lens.1 + 1),
-                Constraint::Min(self.longest_item_lens.2 + 1),
-                Constraint::Min(self.longest_item_lens.3),
+                Constraint::Length(self.col_constraints.0 + 1),
+                Constraint::Min(self.col_constraints.1 + 1),
+                Constraint::Min(self.col_constraints.2 + 1),
+                Constraint::Min(self.col_constraints.3),
             ],
         )
     }
@@ -692,6 +685,10 @@ impl App {
             .height(1)
     }
 
+    fn selection_symbol<'a>() -> Text<'a> {
+        Text::from(vec!["".into(), " █ ".into(), " █ ".into(), "".into()])
+    }
+
     fn render_uat_table(&mut self, frame: &mut Frame, area: Rect) {
         let table_rows = match self.window {
             Window::UAT => self.build_rows(&self.items),
@@ -704,12 +701,7 @@ impl App {
             .row_highlight_style(self.colors.selected_row_style())
             .column_highlight_style(self.colors.selected_col_style())
             .cell_highlight_style(self.colors.selected_cell_style())
-            .highlight_symbol(Text::from(vec![
-                "".into(),
-                " █ ".into(),
-                " █ ".into(),
-                "".into(),
-            ]))
+            .highlight_symbol(Self::selection_symbol())
             .bg(self.colors.buffer_bg)
             .highlight_spacing(HighlightSpacing::Always);
 

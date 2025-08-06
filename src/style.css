@@ -1,0 +1,34 @@
+* {
+    line-height: normal;
+    font-size: 10pt;
+    font-family: Calibri, sans-serif;
+}
+table {
+    width: 709px;
+    border-collapse: collapse;
+    border: none;
+    height: 82px;
+}
+td {
+    border: 1px solid #000000; 
+    padding: 0in 5.4pt;
+    vertical-align: top;
+}
+.step-td {
+    width: 40.6562px;
+}
+.pass-td {
+    width: 67.625px;
+}
+.action-td {
+    width: 275.422px;
+}
+.expected-result-td {
+    width: 79.9375px;
+}
+.comments-td {
+    width: 82.1406px;
+}
+.ac-td {
+    width: 69.9688px;
+}

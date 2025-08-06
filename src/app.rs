@@ -167,111 +167,48 @@ impl App {
         self.msg_state = MsgState::Loaded;
         Ok(())
     }
+
+    fn build_td(class: &str, val: &str) -> String {
+        format!(
+            "<td class=\"{}\" style=\"border: 1px solid black;\">{}</td>",
+            class, val
+        )
+    }
+
+    fn parse_td(options: Options, class: &str, s: String) -> String {
+        let parser = Parser::new_ext(&s, options);
+        let mut html_output = String::new();
+        pulldown_cmark::html::push_html(&mut html_output, parser);
+        Self::build_td(class, html_output.as_str())
+    }
+
     fn gen_html(&self) -> Result<String, String> {
-        let mut table = String::from(
-            r#"
-<style>
-* {
-    line-height: normal;
-    font-size: 10pt;
-    font-family: Calibri, sans-serif;
-}
-table {
-    width: 709px;
-    border-collapse: collapse;
-    border: none;
-    height: 82px;
-}
-td {
-    border: 1px solid #000000; 
-    padding: 0in 5.4pt;
-    vertical-align: top;
-}
-.step-td {
-    width: 40.6562px;
-}
-.pass-td {
-    width: 67.625px;
-}
-.action-td {
-    width: 275.422px;
-}
-.expected-result-td {
-    width: 79.9375px;
-}
-.comments-td {
-    width: 82.1406px;
-}
-.ac-td {
-    width: 69.9688px;
-}
-</style>
-<table class="MsoTableGrid" border="1" width="677" cellspacing="0" cellpadding="0">
-<tbody>
-<tr>
-<td class="step-td" style="border: 1px solid #000000;">
-<p><strong><span>Step</span></strong></p>
-</td>
-<td class="pass-td" style="border: 1px solid #000000;">
-<p><strong><span>Pass/Fail</span></strong></p>
-</td>
-<td class="action-td" style="border: 1px solid #000000;">
-<p><strong><span>Action</span></strong></p>
-</td>
-<td class="expected-result-td" style="border: 1px solid #000000;">
-<p><strong><span>Expected Results</span></strong></p>
-</td>
-<td class="comments-td" style="border: 1px solid #000000;">
-<p><strong><span>Comments</span></strong></p>
-</td>
-<td class="ac-td" style="border: 1px solid #000000;">
-<p><strong><span>Acceptance Criteria #</span></strong></p>
-</td>
-</tr>
-"#,
-        );
+        let mut table = String::new();
 
         let options = Options::empty();
         for (i, item) in self.items.iter().enumerate() {
+            let i = format!("{}.", i + 1);
             table.push_str("<tr>");
-            let s = item.instructions();
-            table.push_str(&format!(
-                "<td class=\"step-td\" style=\"border: 1px solid black;\">{}.</td>",
-                i + 1
+            table.push_str(&Self::build_td("step-td", i.as_str()));
+            table.push_str(&Self::build_td("pass-td", ""));
+            table.push_str(&Self::parse_td(options, "action-td", item.instructions()));
+            table.push_str(&Self::parse_td(
+                options,
+                "expected-result-td",
+                item.expected_results(),
             ));
-            table.push_str("<td class=\"pass-td\" style=\"border: 1px solid black;\"></td>");
-            let parser = Parser::new_ext(&s, options);
-            let mut html_output = String::new();
-            pulldown_cmark::html::push_html(&mut html_output, parser);
-            table.push_str(&format!(
-                "<td class=\"action-td\" style=\"border: 1px solid black;\">{}</td>",
-                html_output
-            ));
-            let s = item.expected_results();
-            let parser = Parser::new_ext(&s, options);
-            let mut html_output = String::new();
-            pulldown_cmark::html::push_html(&mut html_output, parser);
-            table.push_str(&format!(
-                "<td class=\"expected-result-td\" style=\"border: 1px solid black;\">{}</td>",
-                html_output
-            ));
-            table.push_str("<td class=\"comments-td\" style=\"border: 1px solid black;\"></td>");
-            let s = item.ac();
-            let parser = Parser::new_ext(&s, options);
-            let mut html_output = String::new();
-            pulldown_cmark::html::push_html(&mut html_output, parser);
-            table.push_str(&format!(
-                "<td class=\"ac-td\" style=\"border: 1px solid black;\">{}</td>",
-                html_output
-            ));
+            table.push_str(&Self::build_td("comments-td", ""));
+            table.push_str(&Self::parse_td(options, "ac-td", item.ac()));
+            table.push_str("</tr>");
         }
-        table.push_str(&format!(
-            "</tbody></table><div class=\"md-embedding\" id=\"{}:{}\"></div>",
+
+        Ok(format!(
+            include_str!("./template.html"),
+            include_str!("./style.css"),
+            table,
             MDEMBEDDING,
             self.serialize_items()?
-        ));
-
-        Ok(table)
+        ))
     }
 
     fn length_constraint(&self) -> usize {
@@ -281,36 +218,26 @@ td {
         }
     }
 
-    pub fn next_row(&mut self) {
+    fn delta_selection(&self, i: usize, delta: isize) -> usize {
+        ((i as isize + delta).abs() % self.length_constraint() as isize) as usize
+    }
+
+    fn delta_row_impl(&mut self, delta: isize) {
         let i = self
             .state
             .selected()
-            .map(|i| {
-                if i >= self.length_constraint() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            })
+            .map(|i| self.delta_selection(i, delta))
             .unwrap_or(0);
         self.state.select(Some(i));
         self.scroll_state = self.scroll_state.position(i * ITEM_HEIGHT);
     }
 
+    pub fn next_row(&mut self) {
+        self.delta_row_impl(1);
+    }
+
     pub fn previous_row(&mut self) {
-        let i = self
-            .state
-            .selected()
-            .map(|i| {
-                if i == 0 {
-                    self.length_constraint() - 1
-                } else {
-                    i - 1
-                }
-            })
-            .unwrap_or(0);
-        self.state.select(Some(i));
-        self.scroll_state = self.scroll_state.position(i * ITEM_HEIGHT);
+        self.delta_row_impl(-1);
     }
 
     fn open_editor(

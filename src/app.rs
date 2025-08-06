@@ -7,7 +7,7 @@ use arboard::Clipboard;
 use base64::prelude::*;
 use crossterm::event::KeyModifiers;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fs::File,
     io::{Read, Write},
     process::{Command, Stdio},
@@ -30,10 +30,6 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 const ITEM_HEIGHT: usize = 4;
 const MDEMBEDDING: &'static str = "MDEMBEDDING";
-
-//TODO: these don't need to be static. add to app struct
-static CLIPBOARD_CELL: OnceLock<Arc<Mutex<Clipboard>>> = OnceLock::new();
-static EDITOR: OnceLock<String> = OnceLock::new();
 
 struct TableColors {
     buffer_bg: Color,
@@ -101,6 +97,7 @@ enum InputMode {
     Prefix(String),
 }
 pub struct App {
+    clipboard: Clipboard,
     config: Config,
     template_list: Vec<TestStep>,
     window: Window,
@@ -118,7 +115,6 @@ impl App {
     pub fn new() -> Result<Self, String> {
         let clipboard = Clipboard::new().with_err_msg(&"Failed to grab system clipboard")?;
 
-        CLIPBOARD_CELL.get_or_init(|| Arc::new(Mutex::new(clipboard)));
         let config = Config::load_config()?;
         let data_vec = Vec::new();
 
@@ -139,6 +135,7 @@ impl App {
             .collect();
 
         Ok(Self {
+            clipboard,
             template_list,
             config,
             window: Window::UAT,
@@ -310,13 +307,7 @@ impl App {
     }
 
     fn compile_to_clipboard(&mut self) -> Result<MsgState, String> {
-        let mut clipboard = CLIPBOARD_CELL
-            .get()
-            .with_err_msg(&"OnceLock for clipboard is not populated")?
-            .lock()
-            .with_err_msg(&"Failed to grab lock on clipboard")?;
-
-        clipboard
+        self.clipboard
             .set_text(self.gen_html()?)
             .with_err_msg(&"Failed to set clipboard content")?;
 
@@ -410,11 +401,8 @@ impl App {
     }
 
     fn load_from_clipboard(&mut self) -> Result<(), String> {
-        let text = CLIPBOARD_CELL
-            .get()
-            .with_err_msg(&"System Clipboard Failed")?
-            .lock()
-            .with_err_msg(&"Failed to get lock on clipboard cell")?
+        let text = self
+            .clipboard
             .get_text()
             .with_err_msg(&"Failed to get text from system clipboard")?;
 
@@ -630,8 +618,7 @@ impl App {
 
         let mut buffer = String::new();
 
-        let text = file
-            .read_to_string(&mut buffer)
+        file.read_to_string(&mut buffer)
             .with_err_msg(&"Failed to open backup to string")?;
 
         self.parse_clipboard_context(buffer)?;

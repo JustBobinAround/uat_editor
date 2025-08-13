@@ -396,6 +396,36 @@ impl App {
         }
     }
 
+    fn open_preview(&self) -> Result<(), String> {
+        let mut file = File::create("/tmp/uat_editor_preview.html")
+            .with_err_msg(&"Failed to open /tmp/uat_editor_preview.html for editing")?;
+
+        let html = self
+            .gen_html()
+            .with_err_msg(&"Failed to gen html for preview")?;
+
+        file.write_all(&html.as_bytes())
+            .with_err_msg(&"Failed to populate /tmp/uat_editor_preview.html")?;
+
+        opener::open("/tmp/uat_editor_preview.html")
+            .with_err_msg(&"Failed to open html preview")?;
+
+        Ok(())
+    }
+
+    fn paste_or_preview(
+        &mut self,
+        ctrl: bool,
+        shift: bool,
+        direction: InsertDirection,
+    ) -> Result<(), String> {
+        if ctrl && shift {
+            self.open_preview()
+        } else {
+            self.paste(direction)
+        }
+    }
+
     fn handle_unsafe_keys(
         &mut self,
         terminal: &mut DefaultTerminal,
@@ -410,8 +440,12 @@ impl App {
             KeyCode::Char('$') => MsgState::log_err_msg_or(self.compile_to_clipboard()),
             KeyCode::Char('+') => MsgState::log_err_msg(self.load_from_clipboard()),
             KeyCode::Char('d') => MsgState::log_err_msg(self.handle_deletion(ctrl, shift)),
-            KeyCode::Char('p') => MsgState::log_err_msg(self.paste(InsertDirection::Down)),
-            KeyCode::Char('P') => MsgState::log_err_msg(self.paste(InsertDirection::Up)),
+            KeyCode::Char('p') => {
+                MsgState::log_err_msg(self.paste_or_preview(ctrl, shift, InsertDirection::Down))
+            }
+            KeyCode::Char('P') => {
+                MsgState::log_err_msg(self.paste_or_preview(ctrl, shift, InsertDirection::Up))
+            }
             KeyCode::Char('o') => {
                 MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Down))
             }

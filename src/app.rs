@@ -192,7 +192,7 @@ impl App {
     }
 
     fn delta_selection(&self, i: usize, delta: isize) -> usize {
-        ((i as isize + delta).abs() % self.length_constraint() as isize) as usize
+        (i as isize + delta).rem_euclid(self.length_constraint() as isize) as usize
     }
 
     fn delta_row_impl(&mut self, delta: isize) {

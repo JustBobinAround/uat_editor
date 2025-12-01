@@ -93,7 +93,7 @@ impl App {
             .templates
             .keys()
             .map(|name| {
-                let mut data = TestStep::new();
+                let mut data = TestStep::new(false);
                 data.instructions = name.clone();
                 data
             })
@@ -159,8 +159,14 @@ impl App {
         let mut table = String::new();
 
         let options = Options::empty();
-        for (i, item) in self.items.iter().enumerate() {
-            let i = format!("{}.", i + 1);
+        let mut section_idx = 1;
+        let mut step_idx = 1;
+        for item in self.items.iter() {
+            if item.is_new_section {
+                section_idx += 1;
+                step_idx = 1;
+            }
+            let i = format!("{}.{}", section_idx, step_idx);
             table.push_str("<tr>");
             table.push_str(&Self::build_td("step-td", i.as_str()));
             table.push_str(&Self::build_td("pass-td", ""));
@@ -173,6 +179,7 @@ impl App {
             table.push_str(&Self::build_td("comments-td", ""));
             table.push_str(&Self::parse_td(options, "ac-td", item.ac()));
             table.push_str("</tr>");
+            step_idx += 1;
         }
 
         Ok(format!(
@@ -322,14 +329,14 @@ impl App {
         &mut self,
         terminal: &mut DefaultTerminal,
         direction: InsertDirection,
+        is_new_section: bool,
     ) -> Result<(), String> {
-        let data = TestStep::new();
+        let data = TestStep::new(is_new_section);
         let item_md = data.gen_markdown();
         let editor = self.config.editor.clone();
         let content = App::open_editor(editor.as_str(), item_md, terminal)?;
 
-        let new_data = TestStep::parse_markdown(&content)
-            .with_err_msg(&"Failed to parse markdown while inserting step")?;
+        let new_data = TestStep::parse_markdown(&content)?;
 
         if let Some(idx) = self.state.selected() {
             match direction {
@@ -447,10 +454,16 @@ impl App {
                 MsgState::log_err_msg(self.paste_or_preview(ctrl, shift, InsertDirection::Up))
             }
             KeyCode::Char('o') => {
-                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Down))
+                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Down, false))
             }
             KeyCode::Char('O') => {
-                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up))
+                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up, false))
+            }
+            KeyCode::Char('s') => {
+                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Down, true))
+            }
+            KeyCode::Char('S') => {
+                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up, true))
             }
             KeyCode::Char('t') => self.switch_to_template_window(),
             _ => MsgState::Default,
@@ -506,7 +519,7 @@ impl App {
             .templates
             .keys()
             .map(|name| {
-                let mut data = TestStep::new();
+                let mut data = TestStep::new(false);
                 data.instructions = name.clone();
                 data
             })
@@ -669,14 +682,14 @@ impl App {
         Cell::from(Text::from(text))
     }
 
-    fn build_row<'a>(&self, i: usize, data: &TestStep) -> Row<'a> {
+    fn build_row<'a>(&self, section_idx: usize, i: usize, data: &TestStep) -> Row<'a> {
         let item = data.ref_array();
         let mut item: VecDeque<Cell> = item
             .into_iter()
             .map(|content| Self::text_cell(format!("\n{content}\n")))
             .collect();
 
-        item.push_front(Self::text_cell(format!("\n{}\n", i + 1)));
+        item.push_front(Self::text_cell(format!("\n{}.{}\n", section_idx, i + 1)));
 
         item.into_iter()
             .map(|i| i)
@@ -686,10 +699,23 @@ impl App {
     }
 
     fn build_rows<'a>(&self, data: &Vec<TestStep>) -> Vec<Row<'a>> {
-        data.iter()
-            .enumerate()
-            .map(|(i, data)| self.build_row(i, data))
-            .collect()
+        let mut rows = Vec::new();
+        let mut section_idx = 1;
+        let mut step_idx = 0;
+        for test_step in data {
+            if test_step.is_new_section {
+                section_idx += 1;
+                step_idx = 0;
+            }
+            rows.push(self.build_row(section_idx, step_idx, test_step));
+            step_idx += 1;
+        }
+
+        rows
+        // data.iter()
+        //     .enumerate()
+        //     .map(|(i, data)| self.build_row(i, data))
+        //     .collect()
     }
 
     fn build_table<'a>(&self, data: Vec<Row<'a>>) -> Table<'a> {

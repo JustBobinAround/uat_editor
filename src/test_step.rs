@@ -2,14 +2,16 @@ use crate::err_msg::WithErrMsg;
 use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TestStep {
+    pub is_new_section: bool,
     pub instructions: String,
     pub expected_results: String,
     pub ac: String,
 }
 
 impl TestStep {
-    pub fn new() -> TestStep {
+    pub fn new(is_new_section: bool) -> TestStep {
         TestStep {
+            is_new_section,
             instructions: String::new(),
             expected_results: String::new(),
             ac: String::new(),
@@ -39,11 +41,29 @@ impl TestStep {
         let expected_results;
         let ac;
 
-        let idx = lower
-            .find("# instructions")
-            .with_err_msg(&"Could not find instruction section")?;
+        let new_section_str = "# new section";
+        let instructions_str = "# instructions";
 
-        let input = input.split_at(idx + 15).1;
+        let maybe_new_section = lower.find(new_section_str).map(|idx| (idx, true));
+
+        let (idx, is_new_section) = match maybe_new_section {
+            Some(t) => t,
+            None => (
+                lower
+                    .find(instructions_str)
+                    .with_err_msg(&"Failed to find instructions")?,
+                false,
+            ),
+        };
+
+        let offset = if is_new_section {
+            new_section_str.len()
+        } else {
+            instructions_str.len()
+        };
+
+        let input = input.split_at(idx + offset).1;
+
         let lower = input.to_lowercase();
 
         let idx = lower
@@ -66,6 +86,7 @@ impl TestStep {
         ac = splitb.1.to_string();
 
         let data = TestStep {
+            is_new_section,
             instructions,
             expected_results,
             ac,
@@ -75,8 +96,14 @@ impl TestStep {
     }
 
     pub fn gen_markdown(&self) -> String {
+        let pre_str = if self.is_new_section {
+            "# New Section"
+        } else {
+            "# Instructions"
+        };
         format!(
-            "# Instructions\n{}\n\n# Expected Results\n{}\n\n# AC\n{}",
+            "{}\n{}\n\n# Expected Results\n{}\n\n# AC\n{}",
+            pre_str,
             self.instructions(),
             self.expected_results(),
             self.ac()

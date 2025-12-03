@@ -1,7 +1,15 @@
 use crate::err_msg::WithErrMsg;
 use serde::{Deserialize, Serialize};
+
+// defaults to false for backwards compatibility
+pub fn ret_false() -> bool {
+    false
+}
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TestStep {
+    #[serde(default = "ret_false")]
+    pub is_stepless_comment: bool,
+    #[serde(default = "ret_false")]
     pub is_new_section: bool,
     pub instructions: String,
     pub expected_results: String,
@@ -9,8 +17,9 @@ pub struct TestStep {
 }
 
 impl TestStep {
-    pub fn new(is_new_section: bool) -> TestStep {
+    pub fn new(is_stepless_comment: bool, is_new_section: bool) -> TestStep {
         TestStep {
+            is_stepless_comment,
             is_new_section,
             instructions: String::new(),
             expected_results: String::new(),
@@ -41,23 +50,33 @@ impl TestStep {
         let expected_results;
         let ac;
 
+        let comment_section_str = "# comment section";
         let new_section_str = "# new section";
         let instructions_str = "# instructions";
 
-        let maybe_new_section = lower.find(new_section_str).map(|idx| (idx, true));
+        let maybe_new_section = lower.find(new_section_str).map(|idx| (idx, true, false));
+        let maybe_comment_section = lower
+            .find(comment_section_str)
+            .map(|idx| (idx, false, true));
 
-        let (idx, is_new_section) = match maybe_new_section {
+        let (idx, is_new_section, is_stepless_comment) = match maybe_new_section {
             Some(t) => t,
-            None => (
-                lower
-                    .find(instructions_str)
-                    .with_err_msg(&"Failed to find instructions")?,
-                false,
-            ),
+            None => match maybe_comment_section {
+                Some(t) => t,
+                None => (
+                    lower
+                        .find(instructions_str)
+                        .with_err_msg(&"Failed to find instructions")?,
+                    false,
+                    false,
+                ),
+            },
         };
 
         let offset = if is_new_section {
             new_section_str.len()
+        } else if is_stepless_comment {
+            comment_section_str.len()
         } else {
             instructions_str.len()
         };
@@ -86,6 +105,7 @@ impl TestStep {
         ac = splitb.1.to_string();
 
         let data = TestStep {
+            is_stepless_comment,
             is_new_section,
             instructions,
             expected_results,
@@ -98,6 +118,8 @@ impl TestStep {
     pub fn gen_markdown(&self) -> String {
         let pre_str = if self.is_new_section {
             "# New Section"
+        } else if self.is_stepless_comment {
+            "# Comment Section"
         } else {
             "# Instructions"
         };

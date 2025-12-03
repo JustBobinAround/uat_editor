@@ -24,6 +24,17 @@ use ratatui::{
 const ITEM_HEIGHT: usize = 4;
 const MDEMBEDDING: &'static str = "MDEMBEDDING";
 
+enum RowType {
+    SectionStart,
+    SectionMid,
+    SectionEnd,
+    Comment,
+}
+enum ColType {
+    SectionStart,
+    SectionMid,
+    SectionEnd,
+}
 enum Window {
     UAT,
     Template,
@@ -93,7 +104,7 @@ impl App {
             .templates
             .keys()
             .map(|name| {
-                let mut data = TestStep::new(false);
+                let mut data = TestStep::new(false, false);
                 data.instructions = name.clone();
                 data
             })
@@ -141,18 +152,60 @@ impl App {
         Ok(())
     }
 
-    fn build_td(class: &str, val: &str) -> String {
+    fn build_td(class: &str, val: &str, row_type: &RowType, col_type: &ColType) -> String {
+        let mut added_borders = match col_type {
+            &ColType::SectionStart => String::from("border-left: 2px solid black;"),
+            &ColType::SectionMid => String::new(),
+            &ColType::SectionEnd => String::from("border-right: 2px solid black;"),
+        };
+        match row_type {
+            &RowType::SectionStart => {
+                added_borders.push_str("border-top: 2px solid black;");
+            }
+            &RowType::SectionEnd => {
+                added_borders.push_str("border-bottom: 2px solid black;");
+            }
+            &RowType::Comment => {
+                added_borders
+                    .push_str("border-top: 2px solid black; border-bottom: 2px solid black;");
+            }
+            _ => {}
+        }
         format!(
-            "<td class=\"{}\" style=\"border: 1px solid black;\">{}</td>",
-            class, val
+            "<td class=\"{}\" style=\"border: 1px solid black;{}\">{}</td>",
+            class, added_borders, val
         )
     }
 
-    fn parse_td(options: Options, class: &str, s: String) -> String {
+    fn parse_td(
+        options: Options,
+        class: &str,
+        s: String,
+        row_type: &RowType,
+        col_type: &ColType,
+    ) -> String {
         let parser = Parser::new_ext(&s, options);
         let mut html_output = String::new();
         pulldown_cmark::html::push_html(&mut html_output, parser);
-        Self::build_td(class, html_output.as_str())
+        Self::build_td(class, html_output.as_str(), row_type, col_type)
+    }
+
+    fn last_was_comment(&self, current_idx: usize) -> bool {
+        if current_idx == 0 {
+            false
+        } else {
+            self.items
+                .get(current_idx - 1)
+                .map(|i| i.is_stepless_comment)
+                .unwrap_or(false)
+        }
+    }
+
+    fn is_end_of_section(&self, current_idx: usize) -> bool {
+        self.items
+            .get(current_idx + 1)
+            .map(|i| i.is_new_section)
+            .unwrap_or(true)
     }
 
     fn gen_html(&self) -> Result<String, String> {
@@ -161,25 +214,85 @@ impl App {
         let options = Options::empty();
         let mut section_idx = 1;
         let mut step_idx = 1;
-        for item in self.items.iter() {
-            if item.is_new_section {
-                section_idx += 1;
-                step_idx = 1;
-            }
-            let i = format!("{}.{}", section_idx, step_idx);
+        for (idx, item) in self.items.iter().enumerate() {
+            let row_type = if item.is_new_section {
+                if !self.last_was_comment(idx) && idx != 0 && idx != 1 {
+                    section_idx += 1;
+                    step_idx = 1;
+                }
+                RowType::SectionStart
+            } else if item.is_stepless_comment {
+                if self.is_end_of_section(idx) && idx != 0 && idx != 1 {
+                    section_idx += 1;
+                    step_idx = 1;
+                }
+                RowType::Comment
+            } else if idx == 0 {
+                RowType::SectionStart
+            } else if idx == 1 {
+                if self.last_was_comment(idx) {
+                    RowType::SectionStart
+                } else {
+                    RowType::SectionMid
+                }
+            } else {
+                if self.is_end_of_section(idx) {
+                    RowType::SectionEnd
+                } else {
+                    RowType::SectionMid
+                }
+            };
+            let i = if item.is_stepless_comment && idx == 0 {
+                String::new()
+            } else if item.is_stepless_comment {
+                format!("{}", section_idx)
+            } else {
+                format!("{}.{}", section_idx, step_idx)
+            };
             table.push_str("<tr>");
-            table.push_str(&Self::build_td("step-td", i.as_str()));
-            table.push_str(&Self::build_td("pass-td", ""));
-            table.push_str(&Self::parse_td(options, "action-td", item.instructions()));
+            table.push_str(&Self::build_td(
+                "step-td",
+                i.as_str(),
+                &row_type,
+                &ColType::SectionStart,
+            ));
+            table.push_str(&Self::build_td(
+                "pass-td",
+                "",
+                &row_type,
+                &ColType::SectionMid,
+            ));
+            table.push_str(&Self::parse_td(
+                options,
+                "action-td",
+                item.instructions(),
+                &row_type,
+                &ColType::SectionMid,
+            ));
             table.push_str(&Self::parse_td(
                 options,
                 "expected-result-td",
                 item.expected_results(),
+                &row_type,
+                &ColType::SectionMid,
             ));
-            table.push_str(&Self::build_td("comments-td", ""));
-            table.push_str(&Self::parse_td(options, "ac-td", item.ac()));
+            table.push_str(&Self::build_td(
+                "comments-td",
+                "",
+                &row_type,
+                &ColType::SectionMid,
+            ));
+            table.push_str(&Self::parse_td(
+                options,
+                "ac-td",
+                item.ac(),
+                &row_type,
+                &ColType::SectionEnd,
+            ));
             table.push_str("</tr>");
-            step_idx += 1;
+            if !item.is_stepless_comment {
+                step_idx += 1;
+            }
         }
 
         Ok(format!(
@@ -330,8 +443,9 @@ impl App {
         terminal: &mut DefaultTerminal,
         direction: InsertDirection,
         is_new_section: bool,
+        is_stepless_comment: bool,
     ) -> Result<(), String> {
-        let data = TestStep::new(is_new_section);
+        let data = TestStep::new(is_stepless_comment, is_new_section);
         let item_md = data.gen_markdown();
         let editor = self.config.editor.clone();
         let content = App::open_editor(editor.as_str(), item_md, terminal)?;
@@ -453,17 +567,32 @@ impl App {
             KeyCode::Char('P') => {
                 MsgState::log_err_msg(self.paste_or_preview(ctrl, shift, InsertDirection::Up))
             }
-            KeyCode::Char('o') => {
-                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Down, false))
-            }
+            KeyCode::Char('o') => MsgState::log_err_msg(self.insert_step(
+                terminal,
+                InsertDirection::Down,
+                false,
+                false,
+            )),
             KeyCode::Char('O') => {
-                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up, false))
+                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up, false, false))
             }
-            KeyCode::Char('s') => {
-                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Down, true))
-            }
+            KeyCode::Char('s') => MsgState::log_err_msg(self.insert_step(
+                terminal,
+                InsertDirection::Down,
+                true,
+                false,
+            )),
             KeyCode::Char('S') => {
-                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up, true))
+                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up, true, false))
+            }
+            KeyCode::Char('c') => MsgState::log_err_msg(self.insert_step(
+                terminal,
+                InsertDirection::Down,
+                false,
+                true,
+            )),
+            KeyCode::Char('C') => {
+                MsgState::log_err_msg(self.insert_step(terminal, InsertDirection::Up, false, true))
             }
             KeyCode::Char('t') => self.switch_to_template_window(),
             _ => MsgState::Default,
@@ -519,7 +648,7 @@ impl App {
             .templates
             .keys()
             .map(|name| {
-                let mut data = TestStep::new(false);
+                let mut data = TestStep::new(false, false);
                 data.instructions = name.clone();
                 data
             })
@@ -689,7 +818,12 @@ impl App {
             .map(|content| Self::text_cell(format!("\n{content}\n")))
             .collect();
 
-        item.push_front(Self::text_cell(format!("\n{}.{}\n", section_idx, i + 1)));
+        let row_idx = if data.is_stepless_comment {
+            format!("\n{}\n", section_idx)
+        } else {
+            format!("\n{}.{}\n", section_idx, i)
+        };
+        item.push_front(Self::text_cell(row_idx));
 
         item.into_iter()
             .map(|i| i)
@@ -702,20 +836,22 @@ impl App {
         let mut rows = Vec::new();
         let mut section_idx = 1;
         let mut step_idx = 0;
-        for test_step in data {
-            if test_step.is_new_section {
+        for (i, test_step) in data.iter().enumerate() {
+            if test_step.is_new_section && !self.last_was_comment(i) && i != 0 && i != 1 {
                 section_idx += 1;
                 step_idx = 0;
             }
+            if test_step.is_stepless_comment && self.is_end_of_section(i) && i != 0 && i != 1 {
+                section_idx += 1;
+                step_idx = 1;
+            }
             rows.push(self.build_row(section_idx, step_idx, test_step));
-            step_idx += 1;
+            if !test_step.is_stepless_comment {
+                step_idx += 1;
+            }
         }
 
         rows
-        // data.iter()
-        //     .enumerate()
-        //     .map(|(i, data)| self.build_row(i, data))
-        //     .collect()
     }
 
     fn build_table<'a>(&self, data: Vec<Row<'a>>) -> Table<'a> {

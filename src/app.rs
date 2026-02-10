@@ -24,6 +24,7 @@ use ratatui::{
 const ITEM_HEIGHT: usize = 4;
 const MDEMBEDDING: &'static str = "MDEMBEDDING";
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 enum RowType {
     SectionStart,
     SectionMid,
@@ -217,12 +218,14 @@ impl App {
         for (idx, item) in self.items.iter().enumerate() {
             let row_type = if item.is_new_section {
                 if !self.last_was_comment(idx) && idx != 0 && idx != 1 {
+                    table.push_str(include_str!("./header_template.html"));
                     section_idx += 1;
                     step_idx = 1;
                 }
                 RowType::SectionStart
             } else if item.is_stepless_comment {
                 if self.is_end_of_section(idx) && idx != 0 && idx != 1 {
+                    table.push_str(include_str!("./header_template.html"));
                     section_idx += 1;
                     step_idx = 1;
                 }
@@ -298,6 +301,7 @@ impl App {
         Ok(format!(
             include_str!("./template.html"),
             include_str!("./style.css"),
+            include_str!("./header_template.html"),
             table,
             MDEMBEDDING,
             self.serialize_items()?

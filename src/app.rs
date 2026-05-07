@@ -69,10 +69,10 @@ impl MsgState {
     }
 }
 
-enum InputMode {
-    Normal,
-    Prefix(String),
-}
+// enum InputMode {
+//     Normal,
+//     Prefix(String),
+// }
 pub struct App {
     clipboard: Clipboard,
     config: Config,
@@ -85,7 +85,7 @@ pub struct App {
     colors: Colors,
     scroll_state: ScrollbarState,
     internal_clipboard: Option<TestStep>,
-    input_mode: InputMode,
+    // input_mode: InputMode,
 }
 
 impl App {
@@ -123,7 +123,7 @@ impl App {
             colors: Colors::new(),
             items: data_vec,
             internal_clipboard: None,
-            input_mode: InputMode::Normal,
+            // input_mode: InputMode::Normal,
         })
     }
 

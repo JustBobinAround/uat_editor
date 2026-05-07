@@ -62,7 +62,7 @@ impl Colors {
         Style::new().fg(self.row_fg).bg(self.buffer_bg)
     }
 
-    pub fn info_block(&self) -> Block {
+    pub fn info_block(&self) -> Block<'_> {
         Block::bordered()
             .border_type(BorderType::Double)
             .border_style(Style::new().fg(self.footer_border_color))
